@@ -200,6 +200,32 @@ describe('evaluateBatch', () => {
     assert.equal(result.allDone, false);
   });
 
+  it('reports done and ko when batch.state is done and batch.result is ko even if dev servers are running', () => {
+    // Matches batch 2896761 from real runbot where Community Run / dev server is still running
+    const finishedBatchWithServerRunning = {
+      id: 2896761,
+      state: 'done',
+      result: 'ko',
+      logs: [],
+      slots: [
+        {
+          trigger: 'Community Run',
+          build: { id: 133269152, global_state: 'running', global_result: 'ok' },
+        },
+        {
+          trigger: 'Enterprise Tests',
+          build: { id: 133269154, global_state: 'done', global_result: 'ko' },
+        },
+      ],
+    };
+
+    const result = evaluateBatch(finishedBatchWithServerRunning);
+    assert.equal(result.state, 'done');
+    assert.equal(result.allDone, true);
+    assert.equal(result.result, 'ko');
+    assert.equal(result.errors.length, 1);
+  });
+
   it('handles rebuilds: ignores orphaned failed child when rebuild is running', () => {
     const batchWithRebuildRunning = {
       id: 2896761,
