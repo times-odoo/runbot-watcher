@@ -53,7 +53,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.action === 'pollNow') {
-    pollAll().then(() => sendResponse({ ok: true })).catch(err => sendResponse({ error: err.message }));
+    pollAll({ forceAll: true }).then(() => sendResponse({ ok: true })).catch(err => sendResponse({ error: err.message }));
     return true; // keep channel open for async response
   }
   if (message.action === 'fetchLabel') {
@@ -89,7 +89,7 @@ async function fetchLabelForWatch(type, id) {
 
 // ── Poll all watches ─────────────────────────────────────────────────
 
-async function pollAll() {
+async function pollAll({ forceAll = false } = {}) {
   console.log('[Runbot Watcher] Polling...');
   const watches = await getWatches();
   if (watches.length === 0) {
@@ -102,7 +102,7 @@ async function pollAll() {
 
   const results = await Promise.allSettled(
     watches.map(async (item) => {
-      if (item.finished) return item; // skip done items
+      if (item.finished && !forceAll) return item; // skip done items unless forced
       try {
         const updated = await pollOne(item);
         return updated;
@@ -183,9 +183,8 @@ async function pollBatch(item) {
   await notifyBatchErrors(item, batch, status);
 
   // Check if done
-  let finished = item.finished;
-  if (status.allDone && !finished) {
-    finished = true;
+  let finished = status.allDone;
+  if (status.allDone && !item.finished) {
     await notifyBatchDone(item, batch, status);
   }
 
@@ -209,13 +208,14 @@ async function pollBuildWatch(item) {
 
   // Notify errors
   for (const error of status.errors) {
-    const notifKey = `error:${item.id}`;
+    const errorId = error.buildId || item.id;
+    const notifKey = `error:${errorId}`;
     if (!hasNotified(item, notifKey)) {
       const url = batchId
-        ? buildBuildUrl(batchId, item.id)
+        ? buildBuildUrl(batchId, errorId)
         : watchItemUrl(item);
       await sendNotification(item, {
-        title: `❌ Build #${item.id} error`,
+        title: `❌ Build #${errorId} error`,
         message: truncate(error.message, 200) + (error.knownError ? ' (known error)' : ''),
         url,
         notifKey,
@@ -225,9 +225,8 @@ async function pollBuildWatch(item) {
   }
 
   // Check if done
-  let finished = item.finished;
-  if (status.state === 'done' && !finished) {
-    finished = true;
+  let finished = status.state === 'done';
+  if (status.state === 'done' && !item.finished) {
     const doneKey = `done:build:${item.id}`;
     if (!hasNotified(item, doneKey)) {
       const url = batchId

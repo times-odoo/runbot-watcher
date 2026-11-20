@@ -16,6 +16,7 @@ import {
   statusDisplay,
   isForwardPort,
   formatFailedBuilds,
+  getActiveChildren,
 } from '../lib/evaluate.js';
 
 // ── Mock data based on real API responses ────────────────────────────
@@ -197,6 +198,149 @@ describe('evaluateBatch', () => {
     };
     const result = evaluateBatch(batch);
     assert.equal(result.allDone, false);
+  });
+
+  it('handles rebuilds: ignores orphaned failed child when rebuild is running', () => {
+    const batchWithRebuildRunning = {
+      id: 2896761,
+      state: 'ready',
+      result: 'ok',
+      logs: [],
+      slots: [
+        {
+          trigger: 'Enterprise Tests',
+          build: {
+            id: 133269154,
+            global_state: 'waiting',
+            global_result: 'ok',
+            children: [
+              {
+                id: 133270166,
+                description: 'Post install tests for auth_totp -> !html_builder',
+                orphan_result: true,
+                local_state: 'done',
+                global_state: 'done',
+                local_result: 'ko',
+                global_result: 'ko',
+                logs: [{ level: 'ERROR', message: 'Test failed previously' }],
+              },
+              {
+                id: 133272463,
+                description: 'Post install tests for auth_totp -> !html_builder',
+                orphan_result: false,
+                local_state: 'testing',
+                global_state: 'testing',
+                local_result: 'ok',
+                global_result: 'ok',
+                logs: [],
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    const result = evaluateBatch(batchWithRebuildRunning);
+    assert.equal(result.state, 'running');
+    assert.equal(result.allDone, false);
+    assert.equal(result.errors.length, 0); // No error shown while rebuild is running!
+    assert.notEqual(result.result, 'ko');
+  });
+
+  it('handles rebuilds: resolves to ok when rebuild passes', () => {
+    const batchWithRebuildPassed = {
+      id: 2896761,
+      state: 'done',
+      result: 'ok',
+      logs: [],
+      slots: [
+        {
+          trigger: 'Enterprise Tests',
+          build: {
+            id: 133269154,
+            global_state: 'done',
+            global_result: 'ok',
+            children: [
+              {
+                id: 133270166,
+                description: 'Post install tests for auth_totp -> !html_builder',
+                orphan_result: true,
+                local_state: 'done',
+                global_state: 'done',
+                local_result: 'ko',
+                global_result: 'ko',
+                logs: [{ level: 'ERROR', message: 'Test failed previously' }],
+              },
+              {
+                id: 133272463,
+                description: 'Post install tests for auth_totp -> !html_builder',
+                orphan_result: false,
+                local_state: 'done',
+                global_state: 'done',
+                local_result: 'ok',
+                global_result: 'ok',
+                logs: [],
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    const result = evaluateBatch(batchWithRebuildPassed);
+    assert.equal(result.state, 'done');
+    assert.equal(result.allDone, true);
+    assert.equal(result.result, 'ok');
+    assert.equal(result.errors.length, 0);
+  });
+
+  it('handles rebuilds: reports error if rebuild fails again', () => {
+    const batchWithRebuildFailedAgain = {
+      id: 2896761,
+      state: 'done',
+      result: 'ko',
+      logs: [],
+      slots: [
+        {
+          trigger: 'Enterprise Tests',
+          build: {
+            id: 133269154,
+            global_state: 'done',
+            global_result: 'ko',
+            children: [
+              {
+                id: 133270166,
+                description: 'Post install tests for auth_totp -> !html_builder',
+                orphan_result: true,
+                local_state: 'done',
+                global_state: 'done',
+                local_result: 'ko',
+                global_result: 'ko',
+                logs: [{ level: 'ERROR', message: 'First failure' }],
+              },
+              {
+                id: 133272463,
+                description: 'Post install tests for auth_totp -> !html_builder',
+                orphan_result: false,
+                local_state: 'done',
+                global_state: 'done',
+                local_result: 'ko',
+                global_result: 'ko',
+                logs: [{ level: 'ERROR', message: 'Second failure on rebuild' }],
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    const result = evaluateBatch(batchWithRebuildFailedAgain);
+    assert.equal(result.state, 'done');
+    assert.equal(result.allDone, true);
+    assert.equal(result.result, 'ko');
+    assert.equal(result.errors.length, 1);
+    assert.equal(result.errors[0].buildId, 133272463);
+    assert.ok(result.errors[0].message.includes('Second failure'));
   });
 });
 
@@ -388,5 +532,29 @@ describe('formatFailedBuilds', () => {
     };
     const res = formatFailedBuilds(status);
     assert.equal(res.text, 'Failed: Build #133267822');
+  });
+});
+
+describe('getActiveChildren', () => {
+
+  it('filters out orphaned rebuilds and selects newest build for same step', () => {
+    const children = [
+      { id: 133270166, description: 'Step A', orphan_result: true, local_result: 'ko' },
+      { id: 133272463, description: 'Step A', orphan_result: false, local_result: 'ok' },
+      { id: 133270167, description: 'Step B', orphan_result: false, local_result: 'ok' },
+    ];
+    const active = getActiveChildren(children);
+    assert.equal(active.length, 2);
+    const stepA = active.find(c => c.description === 'Step A');
+    assert.equal(stepA.id, 133272463);
+    assert.equal(stepA.orphan_result, false);
+    const stepB = active.find(c => c.description === 'Step B');
+    assert.equal(stepB.id, 133270167);
+  });
+
+  it('handles empty or non-array inputs gracefully', () => {
+    assert.deepEqual(getActiveChildren(null), []);
+    assert.deepEqual(getActiveChildren([]), []);
+    assert.deepEqual(getActiveChildren(undefined), []);
   });
 });
