@@ -102,7 +102,9 @@ async function pollAll({ forceAll = false } = {}) {
 
   const results = await Promise.allSettled(
     watches.map(async (item) => {
-      if (item.finished && !forceAll) return item; // skip done items unless forced
+      // Skip polling only if truly finished AND passed (result: ok).
+      // Items that failed or are running must continue to be polled because they can be rebuilt!
+      if (item.finished && item.status?.result === 'ok' && !forceAll) return item;
       try {
         const updated = await pollOne(item);
         return updated;
@@ -227,7 +229,7 @@ async function pollBuildWatch(item) {
   // Check if done
   let finished = status.state === 'done';
   if (status.state === 'done' && !item.finished) {
-    const doneKey = `done:build:${item.id}`;
+    const doneKey = `done:build:${item.id}:${status.result || 'ok'}`;
     if (!hasNotified(item, doneKey)) {
       const url = batchId
         ? buildBuildUrl(batchId, item.id)
@@ -283,7 +285,7 @@ async function notifyBatchErrors(item, batch, status) {
 
 async function notifyBatchDone(item, batch, status) {
   const batchId = batch.id || item.id;
-  const doneKey = `done:${batchId}`;
+  const doneKey = `done:${batchId}:${status.result || 'ok'}`;
   if (hasNotified(item, doneKey)) return;
 
   const url = buildBatchUrl(batchId);

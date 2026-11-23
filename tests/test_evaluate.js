@@ -17,6 +17,7 @@ import {
   isForwardPort,
   formatFailedBuilds,
   getActiveChildren,
+  isServerBuild,
 } from '../lib/evaluate.js';
 
 // ── Mock data based on real API responses ────────────────────────────
@@ -271,6 +272,67 @@ describe('evaluateBatch', () => {
     assert.equal(result.allDone, false);
     assert.equal(result.errors.length, 0); // No error shown while rebuild is running!
     assert.notEqual(result.result, 'ko');
+  });
+
+  it('handles rebuilds: reports running even if batch.state is done when a rebuild child is testing/running', () => {
+    // Exact scenario from user: batch finished before with KO, batch.state is 'done' on runbot,
+    // but a rebuild child was triggered and is now in 'testing' / 'running' state.
+    const batchDoneWithRebuildRunning = {
+      id: 2896761,
+      state: 'done', // Runbot has state: 'done' from previous run
+      result: 'ok',
+      logs: [],
+      slots: [
+        {
+          trigger: 'Community Run',
+          build: { id: 133269152, global_state: 'running', global_result: 'ok', config: 'Install and run' },
+        },
+        {
+          trigger: 'Enterprise Tests',
+          build: {
+            id: 133269154,
+            global_state: 'done',
+            global_result: 'ok',
+            config: 'Parallel testing',
+            children: [
+              {
+                id: 133270166,
+                description: 'Post install tests for auth_totp -> !html_builder',
+                orphan_result: true,
+                local_state: 'done',
+                global_state: 'done',
+                local_result: 'ko',
+                global_result: 'ko',
+              },
+              {
+                id: 133272463,
+                description: 'Post install tests for auth_totp -> !html_builder',
+                orphan_result: true,
+                local_state: 'done',
+                global_state: 'done',
+                local_result: 'ko',
+                global_result: 'ko',
+              },
+              {
+                id: 133280386,
+                description: 'Post install tests for auth_totp -> !html_builder',
+                orphan_result: false,
+                local_state: 'testing',
+                global_state: 'testing',
+                local_result: 'ok',
+                global_result: 'ok',
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    const result = evaluateBatch(batchDoneWithRebuildRunning);
+    assert.equal(result.state, 'running', 'Batch state should be running when a rebuild child is testing');
+    assert.equal(result.allDone, false, 'Batch should not be allDone while rebuilding');
+    assert.equal(result.result, null, 'Result should not be ok while rebuilding');
+    assert.equal(result.errors.length, 0, 'No errors shown while rebuild is running');
   });
 
   it('handles rebuilds: resolves to ok when rebuild passes', () => {
@@ -582,5 +644,27 @@ describe('getActiveChildren', () => {
     assert.deepEqual(getActiveChildren(null), []);
     assert.deepEqual(getActiveChildren([]), []);
     assert.deepEqual(getActiveChildren(undefined), []);
+  });
+});
+
+describe('isServerBuild', () => {
+  it('identifies server builds by trigger name', () => {
+    assert.equal(isServerBuild({ trigger: 'Community Run' }), true);
+    assert.equal(isServerBuild({ trigger: 'Enterprise Run' }), true);
+    assert.equal(isServerBuild({ trigger: 'Design-themes' }), true);
+    assert.equal(isServerBuild({}, 'Community Run'), true);
+    assert.equal(isServerBuild({}, 'Design-themes'), true);
+  });
+
+  it('identifies server builds by config name', () => {
+    assert.equal(isServerBuild({ config: 'Install and run' }), true);
+    assert.equal(isServerBuild({ config: 'Design Theme' }), true);
+  });
+
+  it('returns false for test builds or builds with children', () => {
+    assert.equal(isServerBuild({ trigger: 'Enterprise Tests', config: 'Parallel testing' }), false);
+    assert.equal(isServerBuild({ trigger: 'Minimal check', config: 'Minimal check' }), false);
+    assert.equal(isServerBuild({ trigger: 'Community Run', children: [{ id: 1 }] }), false);
+    assert.equal(isServerBuild(null), false);
   });
 });
