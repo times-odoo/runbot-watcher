@@ -15,7 +15,9 @@ A lightweight Chrome extension (Manifest V3) that watches Odoo runbot bundles, b
 - **Watch builds** — tracks a single build (with children); notifies when done
 - **Desktop notifications** — instant alerts on errors (`ko` result or ERROR/CRITICAL logs) and on completion, with click-to-open
 - **Deduplication** — never notifies twice for the same event
-- **Live status** — compact list with a status dot per watch (pending / running / ok / warn / ko); hover a row to open or remove it
+- **Live status** — compact list with a status dot per watch (pending / running / ok / warn / ko) and one shared "checked … ago" timer that ticks while the popup is open
+- **Rename** — give a watch your own name (pencil on hover, or double-click the name); empty restores the runbot name
+- **Clear done / Clear all** — with **Undo**, like removing a single watch
 - **Toolbar icon** — a pulse icon coloured by the overall state: grey (nothing watched), blue (running), green (all OK), red (failures); the badge counts watches in error
 - **Light & dark** — follows the system theme
 
@@ -70,6 +72,7 @@ runbot_watcher/
   tests/
     test_urls.js         # URL parsing tests
     test_evaluate.js     # Evaluation logic tests
+    test_storage.js      # Undo, rename and poll-race tests
   docs/screenshot.png    # Popup screenshot (README)
   README.md
 ```
@@ -79,7 +82,7 @@ runbot_watcher/
 Tests use Node.js built-in test runner (no dependencies):
 
 ```bash
-node --test tests/test_urls.js tests/test_evaluate.js
+node --test tests/test_urls.js tests/test_evaluate.js tests/test_storage.js
 ```
 
 ## Notes

@@ -12,7 +12,7 @@
 import { fetchBundle, fetchBatch, fetchBuild } from './lib/api.js';
 import { evaluateBatch, evaluateBuild, findLatestBatchId, isBuildSettled, overallStatus } from './lib/evaluate.js';
 import { buildBatchUrl, buildBuildUrl, watchItemUrl } from './lib/urls.js';
-import { getWatches, mergePolledWatches, hasNotified, setApiError } from './lib/storage.js';
+import { getWatches, mergePolledWatches, hasNotified, setApiError, setLastPollAt } from './lib/storage.js';
 
 const ALARM_NAME = 'runbot-poll';
 const POLL_INTERVAL_MINUTES = 1;
@@ -105,6 +105,7 @@ async function doPollAll({ force = false, keys = null } = {}) {
   }));
 
   const merged = await mergePolledWatches(polled);
+  await setLastPollAt(new Date().toISOString());
   await setApiError(failures ? `${failures} of ${toPoll.length} API request(s) failed` : null);
   updateBadge(merged);
 }

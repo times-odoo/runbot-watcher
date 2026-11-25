@@ -39,6 +39,11 @@
     <div class="section-head">
       <span class="label">Watching</span>
       <span id="watch-count" class="count hidden"></span>
+      <span id="last-poll" class="last-poll" title="All watches are checked every minute"></span>
+      <span class="head-actions">
+        <button id="btn-clear-done" class="btn-link hidden" title="Stop watching everything that has finished">Clear done</button>
+        <button id="btn-clear-all" class="btn-link danger hidden" title="Stop watching everything">Clear all</button>
+      </span>
     </div>
 
     <div id="api-error" class="banner hidden" role="status">
@@ -50,7 +55,10 @@
     <ul id="watch-list" class="list"></ul>
   </section>
 
-  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite">
+    <span id="toast-msg"></span>
+    <button id="toast-action" class="toast-action hidden">Undo</button>
+  </div>
 
   <script type="module" src="popup.js"></script>
 </body>

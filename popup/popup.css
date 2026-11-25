@@ -154,6 +154,13 @@ a { color: var(--accent); }
 }
 
 .count { font-size: 11px; color: var(--dim); }
+.last-poll { font-size: 11px; color: var(--dim); }
+.last-poll:not(:empty)::before { content: '·'; margin-right: 6px; }
+
+.head-actions { margin-left: auto; display: flex; gap: 10px; }
+.head-actions .btn-link { font-size: 11px; text-decoration: none; }
+.head-actions .btn-link:hover { text-decoration: underline; color: var(--text); }
+.head-actions .btn-link.danger:hover { color: var(--ko); }
 
 .banner {
   margin: 4px 14px 6px;
@@ -210,6 +217,20 @@ a { color: var(--accent); }
 .title:hover { text-decoration: underline; text-underline-offset: 2px; }
 .title.loading { color: var(--dim); font-weight: 400; }
 
+/* Inline rename */
+.rename {
+  min-width: 0;
+  font: inherit;
+  font-weight: 500;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 0 4px;
+  margin: -1px 0 -1px -5px;
+  outline: none;
+}
+
 .time { font-size: 11px; color: var(--dim); white-space: nowrap; }
 
 .meta {
@@ -238,6 +259,7 @@ a { color: var(--accent); }
   opacity: 0;
 }
 .item:hover .actions, .item:focus-within .actions { opacity: 1; }
+.item.editing .actions { display: none; }
 .actions .icon-btn { width: 24px; height: 24px; }
 .actions .icon { width: 14px; height: 14px; }
 .actions .remove:hover { color: var(--ko); }
@@ -255,11 +277,18 @@ a { color: var(--accent); }
   color: var(--bg);
   font-size: 12px;
   white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 12px;
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.15s, transform 0.15s;
 }
-.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+/* The toast inverts the theme, so its link uses the other theme's accent. */
+.toast-action { color: #d2a5c8; font-weight: 600; }
+@media (prefers-color-scheme: dark) { .toast-action { color: #714b67; } }
+.toast-action:hover { text-decoration: underline; }
 
 /* Scrollbar */
 body::-webkit-scrollbar { width: 6px; }

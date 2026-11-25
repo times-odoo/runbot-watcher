@@ -7,7 +7,10 @@
  */
 
 import { parseRunbotUrl, watchItemUrl, RUNBOT_BASE } from '../lib/urls.js';
-import { getWatches, addWatch, removeWatch, getApiError } from '../lib/storage.js';
+import {
+  getWatches, addWatch, removeWatches, restoreWatches, renameWatch,
+  getApiError, getLastPollAt,
+} from '../lib/storage.js';
 import { statusDisplay, isForwardPort, formatFailedBuilds } from '../lib/evaluate.js';
 
 const $ = (id) => document.getElementById(id);
@@ -19,37 +22,56 @@ const btnAdd           = $('btn-add');
 const watchingState    = $('watching-state');
 const btnRemoveContext = $('btn-remove-context');
 const watchCountEl     = $('watch-count');
+const lastPollEl       = $('last-poll');
+const btnClearDone     = $('btn-clear-done');
+const btnClearAll      = $('btn-clear-all');
 const watchListEl      = $('watch-list');
 const emptyListEl      = $('empty-list');
 const btnPoll          = $('btn-poll');
 const apiErrorEl       = $('api-error');
 const apiErrorMsg      = $('api-error-msg');
 const toastEl          = $('toast');
+const toastMsg         = $('toast-msg');
+const toastAction      = $('toast-action');
 
 const ICON_OPEN = '<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M9 2.5h4.5V7M13.5 2.5 7.5 8.5M11.5 9.5v3a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3"/></svg>';
+const ICON_RENAME = '<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 2.5l3 3-8 8H2.5v-3z"/><path d="M9 4l3 3"/></svg>';
 const ICON_REMOVE = '<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
 
+// A watch whose last check is this much older than the last poll is shown
+// with its own time (finished-OK watches are no longer polled, failed polls).
+const STALE_MS = 90_000;
+
 let currentParsed = null; // parsed URL of the active tab
+let lastPollAt = null;    // ISO time of the last poll (shared timer)
+let editingKey = null;    // watch being renamed: don't re-render under the input
+let renderPending = false;
 
 // ── Init ─────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', async () => {
+  lastPollAt = await getLastPollAt();
   await detectCurrentTab();
   await renderWatchList();
   await checkApiError();
 
   btnPoll.addEventListener('click', onPollNow);
+  btnClearAll.addEventListener('click', onClearAll);
+  btnClearDone.addEventListener('click', onClearDone);
   $('link-runbot').addEventListener('click', (e) => {
     e.preventDefault();
     openTab(RUNBOT_BASE);
   });
 
-  // Keep the relative "last checked" times fresh while the popup is open
-  setInterval(renderWatchList, 30_000);
+  // Live relative times: only text updates, no re-render.
+  setInterval(tickTimes, 1000);
 
-  // Re-render on any change (also covers our own writes)
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
+    if (changes.lastPollAt) {
+      lastPollAt = changes.lastPollAt.newValue || null;
+      tickTimes();
+    }
     if (changes.watches) {
       renderWatchList();
       updateContextButtons();
@@ -72,10 +94,7 @@ async function detectCurrentTab() {
   contextDetected.classList.toggle('hidden', !currentParsed);
   if (!currentParsed) return;
 
-  const typeName = capitalize(currentParsed.type);
-  contextIdEl.textContent = `${typeName} ${currentParsed.id}`;
   contextIdEl.title = currentParsed.url;
-
   btnAdd.onclick = () => onAdd(currentParsed);
   btnRemoveContext.onclick = () => onRemoveContext(currentParsed);
   await updateContextButtons();
@@ -84,9 +103,11 @@ async function detectCurrentTab() {
 async function updateContextButtons() {
   if (!currentParsed) return;
   const watches = await getWatches();
-  const isWatched = watches.some(w => w.key === `${currentParsed.type}:${currentParsed.id}`);
-  btnAdd.classList.toggle('hidden', isWatched);
-  watchingState.classList.toggle('hidden', !isWatched);
+  const watch = watches.find(w => w.key === `${currentParsed.type}:${currentParsed.id}`);
+  btnAdd.classList.toggle('hidden', !!watch);
+  watchingState.classList.toggle('hidden', !watch);
+  // Once watched (and named), show the same name as in the list.
+  contextIdEl.textContent = (watch && displayName(watch)) || `${capitalize(currentParsed.type)} ${currentParsed.id}`;
 }
 
 // ── Add / Remove ─────────────────────────────────────────────────────
@@ -109,26 +130,65 @@ async function onAdd(parsed) {
 }
 
 async function onRemoveContext(parsed) {
-  await removeWatch(`${parsed.type}:${parsed.id}`);
-  showToast('Stopped watching');
+  await removeWithUndo([`${parsed.type}:${parsed.id}`]);
+}
+
+async function onClearAll() {
+  const watches = await getWatches();
+  await removeWithUndo(watches.map(w => w.key));
+}
+
+async function onClearDone() {
+  const watches = await getWatches();
+  await removeWithUndo(watches.filter(w => w.finished).map(w => w.key));
+}
+
+async function removeWithUndo(keys) {
+  if (keys.length === 0) return;
+  const removed = await removeWatches(keys);
+  const message = removed.length === 1
+    ? `Stopped watching ${displayName(removed[0].item)}`
+    : `Stopped watching ${removed.length} items`;
+  showToast(message, {
+    action: 'Undo',
+    onAction: async () => {
+      await restoreWatches(removed);
+      showToast('Restored');
+    },
+  });
 }
 
 // ── Watch list ───────────────────────────────────────────────────────
 
+function displayName(item) {
+  if (item.customLabel) return item.customLabel;
+  const loaded = item.lastCheckedAt || item.lastError;
+  return loaded ? (item.label || item.id) : `${capitalize(item.type)} ${item.id}`;
+}
+
 async function renderWatchList() {
+  if (editingKey) {
+    renderPending = true;
+    return;
+  }
+  renderPending = false;
   const watches = await getWatches();
 
   watchCountEl.textContent = String(watches.length);
   watchCountEl.classList.toggle('hidden', watches.length === 0);
+  btnClearAll.classList.toggle('hidden', watches.length === 0);
+  btnClearDone.classList.toggle('hidden', !watches.some(w => w.finished) || watches.every(w => w.finished));
   emptyListEl.classList.toggle('hidden', watches.length > 0);
   watchListEl.replaceChildren(...watches.map(createWatchItem));
+  tickTimes(watches);
 }
 
 function createWatchItem(item) {
   const status = statusDisplay(item.status);
   const statusKey = status.cssClass.replace('status-', ''); // ok|ko|warn|running|pending|done
   const isLoading = !item.lastCheckedAt && !item.lastError;
-  const title = isLoading ? `${capitalize(item.type)} ${item.id}` : (item.label || item.id);
+  const name = displayName(item);
+  const tooltip = item.customLabel && item.label ? `${item.customLabel} (${item.label})` : name;
   const url = watchItemUrl(item);
 
   const failed = formatFailedBuilds(item.status);
@@ -152,11 +212,12 @@ function createWatchItem(item) {
   li.dataset.status = statusKey;
   li.innerHTML = `
     <span class="dot" title="${escapeHtml(status.text)}"></span>
-    <button class="title${isLoading ? ' loading' : ''}" data-action="open" title="${escapeHtml(title)}">${escapeHtml(title)}</button>
-    <span class="time" title="Last checked">${escapeHtml(formatRelativeTime(item.lastCheckedAt))}</span>
+    <button class="title${isLoading ? ' loading' : ''}" data-action="open" title="${escapeHtml(tooltip)}">${escapeHtml(name)}</button>
+    <span class="time" data-since="${escapeHtml(item.lastCheckedAt || '')}" title="Last checked"></span>
     <div class="meta">${meta.join('')}</div>
     <div class="actions">
       <button class="icon-btn" data-action="open" title="Open in runbot" aria-label="Open in runbot">${ICON_OPEN}</button>
+      <button class="icon-btn" data-action="rename" title="Rename" aria-label="Rename">${ICON_RENAME}</button>
       <button class="icon-btn remove" data-action="remove" title="Stop watching" aria-label="Stop watching">${ICON_REMOVE}</button>
     </div>
   `;
@@ -164,13 +225,80 @@ function createWatchItem(item) {
   for (const btn of li.querySelectorAll('[data-action="open"]')) {
     btn.addEventListener('click', () => openTab(url));
   }
+  li.querySelector('[data-action="rename"]').addEventListener('click', () => startRename(li, item));
+  li.querySelector('.title').addEventListener('dblclick', (e) => {
+    e.preventDefault();
+    startRename(li, item);
+  });
   li.querySelector('[data-action="remove"]').addEventListener('click', async () => {
     li.classList.add('removing');
-    await removeWatch(item.key);
-    showToast('Stopped watching');
+    await removeWithUndo([item.key]);
   });
 
   return li;
+}
+
+// ── Rename ───────────────────────────────────────────────────────────
+
+function startRename(li, item) {
+  if (editingKey) return;
+  editingKey = item.key;
+
+  const input = document.createElement('input');
+  input.className = 'rename';
+  input.value = displayName(item);
+  input.placeholder = item.label || item.id;
+  input.setAttribute('aria-label', 'Name (empty to use the runbot name)');
+  li.querySelector('.title').replaceWith(input);
+  li.classList.add('editing');
+  input.focus();
+  input.select();
+
+  let finished = false;
+  const finish = async (save) => {
+    if (finished) return;
+    finished = true;
+    const value = input.value.trim();
+    const changed = save && value !== displayName(item);
+    editingKey = null;
+    if (changed) {
+      // Typing the runbot name back (or nothing) removes the custom name.
+      await renameWatch(item.key, value === item.label ? '' : value);
+    } else {
+      renderWatchList();
+    }
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      finish(true);
+    } else if (e.key === 'Escape') {
+      e.preventDefault(); // keep the popup open
+      finish(false);
+    }
+  });
+  input.addEventListener('blur', () => finish(true));
+}
+
+// ── Times ────────────────────────────────────────────────────────────
+
+/** Update the shared "checked …" timer and stale per-row times. */
+function tickTimes(watches) {
+  // Before the first poll after an update, fall back to the newest check.
+  let last = lastPollAt;
+  if (!last && Array.isArray(watches)) {
+    last = watches.map(w => w.lastCheckedAt).filter(Boolean).sort().pop() || null;
+    lastPollAt = last;
+  }
+  const hasWatches = watchListEl.childElementCount > 0;
+  lastPollEl.textContent = last && hasWatches ? `checked ${formatRelativeTime(last)}` : '';
+
+  const lastMs = last ? Date.parse(last) : 0;
+  for (const el of watchListEl.querySelectorAll('.time')) {
+    const since = el.dataset.since;
+    const stale = since && lastMs - Date.parse(since) > STALE_MS;
+    el.textContent = stale ? formatRelativeTime(since) : '';
+  }
 }
 
 // ── Poll now ─────────────────────────────────────────────────────────
@@ -201,11 +329,27 @@ async function checkApiError() {
 
 let toastTimer = null;
 
-function showToast(message) {
-  toastEl.textContent = message;
+/**
+ * @param {string} message
+ * @param {{ action?: string, onAction?: Function }} [options]  e.g. an Undo button
+ */
+function showToast(message, { action = null, onAction = null } = {}) {
+  toastMsg.textContent = message;
+  toastAction.textContent = action || '';
+  toastAction.classList.toggle('hidden', !action);
+  toastAction.onclick = action ? () => {
+    hideToast();
+    onAction();
+  } : null;
   toastEl.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1800);
+  // Leave time to reach the Undo button.
+  toastTimer = setTimeout(hideToast, action ? 6000 : 1800);
+}
+
+function hideToast() {
+  clearTimeout(toastTimer);
+  toastEl.classList.remove('show');
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -230,12 +374,12 @@ function escapeHtml(str) {
 
 function formatRelativeTime(isoString) {
   if (!isoString) return '';
-  const seconds = Math.floor((Date.now() - new Date(isoString).getTime()) / 1000);
-  if (seconds < 10) return 'now';
-  if (seconds < 60) return `${seconds}s`;
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(isoString).getTime()) / 1000));
+  if (seconds < 5) return 'just now';
+  if (seconds < 60) return `${seconds}s ago`;
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 48) return `${hours}h`;
-  return `${Math.floor(hours / 24)}d`;
+  if (hours < 48) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 }
