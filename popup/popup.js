@@ -251,6 +251,10 @@ function startRename(li, item) {
   input.setAttribute('aria-label', 'Name (empty to use the runbot name)');
   li.querySelector('.title').replaceWith(input);
   li.classList.add('editing');
+  const meta = li.querySelector('.meta');
+  const metaHtml = meta.innerHTML;
+  meta.textContent = 'Enter to save · Esc to cancel · empty = runbot name';
+  meta.classList.add('rename-hint');
   input.focus();
   input.select();
 
@@ -261,6 +265,8 @@ function startRename(li, item) {
     const value = input.value.trim();
     const changed = save && value !== displayName(item);
     editingKey = null;
+    meta.innerHTML = metaHtml;
+    meta.classList.remove('rename-hint');
     if (changed) {
       // Typing the runbot name back (or nothing) removes the custom name.
       await renameWatch(item.key, value === item.label ? '' : value);

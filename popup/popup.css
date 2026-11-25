@@ -217,19 +217,27 @@ a { color: var(--accent); }
 .title:hover { text-decoration: underline; text-underline-offset: 2px; }
 .title.loading { color: var(--dim); font-weight: 400; }
 
-/* Inline rename */
+/* Inline rename: the name itself becomes editable, nothing moves. */
 .rename {
+  grid-column: 2 / span 2;
   min-width: 0;
+  width: 100%;
   font: inherit;
   font-weight: 500;
   color: var(--text);
-  background: var(--bg);
-  border: 1px solid var(--accent);
-  border-radius: 4px;
-  padding: 0 4px;
-  margin: -1px 0 -1px -5px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--accent);
+  border-radius: 0;
+  padding: 0;
+  margin: 0;
   outline: none;
 }
+.rename::selection { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+.rename::placeholder { color: var(--dim); font-weight: 400; }
+.item.editing .time { display: none; }
+.meta.rename-hint { font-size: 11px; margin-top: 4px; }
+.item.editing { background: var(--bg-hover); }
 
 .time { font-size: 11px; color: var(--dim); white-space: nowrap; }
 
