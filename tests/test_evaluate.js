@@ -18,6 +18,8 @@ import {
   formatFailedBuilds,
   getActiveChildren,
   isServerBuild,
+  isBuildSettled,
+  overallStatus,
 } from '../lib/evaluate.js';
 
 // ── Mock data based on real API responses ────────────────────────────
@@ -666,5 +668,44 @@ describe('isServerBuild', () => {
     assert.equal(isServerBuild({ trigger: 'Minimal check', config: 'Minimal check' }), false);
     assert.equal(isServerBuild({ trigger: 'Community Run', children: [{ id: 1 }] }), false);
     assert.equal(isServerBuild(null), false);
+  });
+});
+
+describe('isBuildSettled', () => {
+  it('is settled when the build is done', () => {
+    assert.equal(isBuildSettled(MOCK_BUILD_OK, evaluateBuild(MOCK_BUILD_OK)), true);
+  });
+
+  it('is settled when a server build is up and serving with a result', () => {
+    assert.equal(isBuildSettled(MOCK_BUILD_RUNNING, evaluateBuild(MOCK_BUILD_RUNNING)), true);
+  });
+
+  it('is not settled while a non-server build is running', () => {
+    const build = { ...MOCK_BUILD_RUNNING, trigger: 'Parallel testing', config: 'Parallel testing' };
+    assert.equal(isBuildSettled(build, evaluateBuild(build)), false);
+  });
+
+  it('is not settled while a server build is still testing', () => {
+    const build = { ...MOCK_BUILD_RUNNING, local_state: 'testing', global_state: 'testing' };
+    assert.equal(isBuildSettled(build, evaluateBuild(build)), false);
+  });
+});
+
+describe('overallStatus', () => {
+  const w = (state, result, errors = []) => ({ status: { state, result, errors } });
+
+  it('is idle without watches', () => {
+    assert.equal(overallStatus([]), 'idle');
+  });
+  it('is ko when any watch failed, even if others run', () => {
+    assert.equal(overallStatus([w('running', null), w('done', 'ko')]), 'ko');
+    assert.equal(overallStatus([w('running', null, [{ buildId: 1 }])]), 'ko');
+  });
+  it('is running when something is not done (or never polled)', () => {
+    assert.equal(overallStatus([w('done', 'ok'), w('running', null)]), 'running');
+    assert.equal(overallStatus([{ status: null }]), 'running');
+  });
+  it('is ok when everything is done without failures', () => {
+    assert.equal(overallStatus([w('done', 'ok'), w('done', 'warn')]), 'ok');
   });
 });

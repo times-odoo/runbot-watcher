@@ -109,3 +109,14 @@ describe('URL builders', () => {
     );
   });
 });
+
+describe('parseRunbotUrl host check', () => {
+  it('ignores runbot-like paths on other hosts', () => {
+    assert.equal(parseRunbotUrl('https://example.com/runbot/batch/100/build/200'), null);
+    assert.equal(parseRunbotUrl('https://runbot.odoo.com.evil.test/runbot/batch/100'), null);
+  });
+
+  it('ignores runbot paths that are not at the root', () => {
+    assert.equal(parseRunbotUrl('https://runbot.odoo.com/foo/runbot/batch/100'), null);
+  });
+});

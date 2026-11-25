@@ -1,38 +1,35 @@
 /**
  * Runbot Watcher — Popup UI
  *
- * Renders the context card (current tab detection) and the watch list.
- * Communicates with the background service worker via chrome.runtime.sendMessage
- * and reads/writes chrome.storage.local.
+ * Shows the current runbot page (with a Watch button) and the watch list.
+ * Talks to the service worker via chrome.runtime.sendMessage and reads/writes
+ * chrome.storage.local; the list re-renders on every storage change.
  */
 
-import { parseRunbotUrl, watchItemUrl } from '../lib/urls.js';
+import { parseRunbotUrl, watchItemUrl, RUNBOT_BASE } from '../lib/urls.js';
 import { getWatches, addWatch, removeWatch, getApiError } from '../lib/storage.js';
 import { statusDisplay, isForwardPort, formatFailedBuilds } from '../lib/evaluate.js';
 
-// ── DOM references ───────────────────────────────────────────────────
+const $ = (id) => document.getElementById(id);
 
-const contextCard      = document.getElementById('context-card');
-const contextNotRunbot = document.getElementById('context-not-runbot');
-const contextDetected  = document.getElementById('context-detected');
-const contextBadge     = document.getElementById('context-badge');
-const contextFwBadge   = document.getElementById('context-fw-badge');
-const contextIdEl      = document.getElementById('context-id');
-const btnAdd           = document.getElementById('btn-add');
-const watchingState    = document.getElementById('watching-state');
-const btnRemoveContext = document.getElementById('btn-remove-context');
-const watchCountEl     = document.getElementById('watch-count');
-const watchListEl      = document.getElementById('watch-list');
-const emptyListEl      = document.getElementById('empty-list');
-const btnPoll          = document.getElementById('btn-poll');
-const pollLabel        = document.getElementById('poll-label');
-const pollSpinner      = document.getElementById('poll-spinner');
-const apiErrorEl       = document.getElementById('api-error');
-const apiErrorMsg      = document.getElementById('api-error-msg');
-const toastEl          = document.getElementById('toast');
-const linkRunbot       = document.getElementById('link-runbot');
+const contextNotRunbot = $('context-not-runbot');
+const contextDetected  = $('context-detected');
+const contextIdEl      = $('context-id');
+const btnAdd           = $('btn-add');
+const watchingState    = $('watching-state');
+const btnRemoveContext = $('btn-remove-context');
+const watchCountEl     = $('watch-count');
+const watchListEl      = $('watch-list');
+const emptyListEl      = $('empty-list');
+const btnPoll          = $('btn-poll');
+const apiErrorEl       = $('api-error');
+const apiErrorMsg      = $('api-error-msg');
+const toastEl          = $('toast');
 
-let currentParsed = null; // parsed URL of current tab
+const ICON_OPEN = '<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M9 2.5h4.5V7M13.5 2.5 7.5 8.5M11.5 9.5v3a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3"/></svg>';
+const ICON_REMOVE = '<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
+
+let currentParsed = null; // parsed URL of the active tab
 
 // ── Init ─────────────────────────────────────────────────────────────
 
@@ -42,82 +39,52 @@ document.addEventListener('DOMContentLoaded', async () => {
   await checkApiError();
 
   btnPoll.addEventListener('click', onPollNow);
+  $('link-runbot').addEventListener('click', (e) => {
+    e.preventDefault();
+    openTab(RUNBOT_BASE);
+  });
 
-  if (linkRunbot) {
-    linkRunbot.addEventListener('click', (e) => {
-      e.preventDefault();
-      chrome.tabs.create({ url: 'https://runbot.odoo.com' });
-    });
-  }
+  // Keep the relative "last checked" times fresh while the popup is open
+  setInterval(renderWatchList, 30_000);
 
-  // Listen for storage changes to live-update
+  // Re-render on any change (also covers our own writes)
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'local' && changes.watches) {
+    if (area !== 'local') return;
+    if (changes.watches) {
       renderWatchList();
-      if (currentParsed) updateContextButtons();
+      updateContextButtons();
     }
-    if (area === 'local' && changes.apiError) {
-      checkApiError();
-    }
+    if (changes.apiError) checkApiError();
   });
 });
 
-// ── Current tab detection ────────────────────────────────────────────
+// ── Current tab ──────────────────────────────────────────────────────
 
 async function detectCurrentTab() {
-  contextCard.classList.remove('hidden');
-
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.url) {
-      showNotRunbot();
-      return;
-    }
-
-    currentParsed = parseRunbotUrl(tab.url);
-    if (!currentParsed) {
-      showNotRunbot();
-      return;
-    }
-
-    showDetected(currentParsed);
+    currentParsed = parseRunbotUrl(tab?.url);
   } catch {
-    showNotRunbot();
-  }
-}
-
-function showNotRunbot() {
-  contextNotRunbot.classList.remove('hidden');
-  contextDetected.classList.add('hidden');
-}
-
-function showDetected(parsed) {
-  contextNotRunbot.classList.add('hidden');
-  contextDetected.classList.remove('hidden');
-
-  contextBadge.textContent = parsed.type;
-  contextBadge.className = `type-tag type-${parsed.type}`;
-
-  const isFw = isForwardPort(parsed.id);
-  if (contextFwBadge) {
-    contextFwBadge.classList.toggle('hidden', !isFw);
+    currentParsed = null;
   }
 
-  contextIdEl.textContent = `#${parsed.id}`;
-  contextIdEl.title = parsed.id;
+  contextNotRunbot.classList.toggle('hidden', !!currentParsed);
+  contextDetected.classList.toggle('hidden', !currentParsed);
+  if (!currentParsed) return;
 
-  updateContextButtons();
+  const typeName = capitalize(currentParsed.type);
+  contextIdEl.textContent = `${typeName} ${currentParsed.id}`;
+  contextIdEl.title = currentParsed.url;
 
-  btnAdd.onclick = () => onAdd(parsed);
-  btnRemoveContext.onclick = () => onRemoveContext(parsed);
+  btnAdd.onclick = () => onAdd(currentParsed);
+  btnRemoveContext.onclick = () => onRemoveContext(currentParsed);
+  await updateContextButtons();
 }
 
 async function updateContextButtons() {
   if (!currentParsed) return;
   const watches = await getWatches();
-  const key = `${currentParsed.type}:${currentParsed.id}`;
-  const isWatched = watches.some(w => w.key === key);
-
+  const isWatched = watches.some(w => w.key === `${currentParsed.type}:${currentParsed.id}`);
   btnAdd.classList.toggle('hidden', isWatched);
   watchingState.classList.toggle('hidden', !isWatched);
 }
@@ -126,142 +93,81 @@ async function updateContextButtons() {
 
 async function onAdd(parsed) {
   btnAdd.disabled = true;
-  const item = await addWatch({
-    type: parsed.type,
-    id: parsed.id,
-    batchId: parsed.batchId,
-    label: parsed.id, // placeholder until fetched
-  });
-
-  showToast('Added to watch list');
-  await updateContextButtons();
-  await renderWatchList();
-  btnAdd.disabled = false;
-
-  // Fetch real label in background
-  chrome.runtime.sendMessage(
-    { action: 'fetchLabel', type: parsed.type, id: parsed.id },
-    async (response) => {
-      if (response?.label) {
-        const watches = await getWatches();
-        const idx = watches.findIndex(w => w.key === item.key);
-        if (idx !== -1) {
-          watches[idx].label = response.label;
-          await chrome.storage.local.set({ watches });
-          renderWatchList();
-        }
-      }
-    }
-  );
-
-  // Trigger a poll
-  chrome.runtime.sendMessage({ action: 'pollNow' });
+  try {
+    const item = await addWatch({
+      type: parsed.type,
+      id: parsed.id,
+      batchId: parsed.batchId,
+      label: parsed.id, // placeholder, replaced by the first poll
+    });
+    showToast('Watching');
+    // Poll only the new item: fills in its label and status.
+    chrome.runtime.sendMessage({ action: 'pollNow', keys: [item.key] }).catch(() => {});
+  } finally {
+    btnAdd.disabled = false;
+  }
 }
 
 async function onRemoveContext(parsed) {
-  const key = `${parsed.type}:${parsed.id}`;
-  await removeWatch(key);
-  showToast('Removed from watch list');
-  await updateContextButtons();
-  await renderWatchList();
+  await removeWatch(`${parsed.type}:${parsed.id}`);
+  showToast('Stopped watching');
 }
 
-// ── Watch list rendering ─────────────────────────────────────────────
+// ── Watch list ───────────────────────────────────────────────────────
 
 async function renderWatchList() {
   const watches = await getWatches();
 
-  if (watchCountEl) {
-    if (watches.length > 0) {
-      watchCountEl.textContent = String(watches.length);
-      watchCountEl.classList.remove('hidden');
-    } else {
-      watchCountEl.classList.add('hidden');
-    }
-  }
-
-  if (watches.length === 0) {
-    emptyListEl.classList.remove('hidden');
-    watchListEl.classList.add('hidden');
-    return;
-  }
-
-  emptyListEl.classList.add('hidden');
-  watchListEl.classList.remove('hidden');
-
-  watchListEl.innerHTML = '';
-  for (const item of watches) {
-    watchListEl.appendChild(createWatchItem(item));
-  }
+  watchCountEl.textContent = String(watches.length);
+  watchCountEl.classList.toggle('hidden', watches.length === 0);
+  emptyListEl.classList.toggle('hidden', watches.length > 0);
+  watchListEl.replaceChildren(...watches.map(createWatchItem));
 }
 
 function createWatchItem(item) {
+  const status = statusDisplay(item.status);
+  const statusKey = status.cssClass.replace('status-', ''); // ok|ko|warn|running|pending|done
+  const isLoading = !item.lastCheckedAt && !item.lastError;
+  const title = isLoading ? `${capitalize(item.type)} ${item.id}` : (item.label || item.id);
+  const url = watchItemUrl(item);
+
+  const failed = formatFailedBuilds(item.status);
+  const meta = [`<span>${escapeHtml(item.type)}</span>`];
+  if (isLoading) {
+    meta.push('<span class="sep">loading…</span>');
+  } else if (!failed) {
+    // When there are failures, the "Failed: …" summary already says it.
+    meta.push(`<span class="sep st-${statusKey}">${escapeHtml(status.text)}</span>`);
+  }
+  if (isForwardPort(item)) meta.push('<span class="sep">fw-port</span>');
+  if (item.lastError) {
+    meta.push(`<span class="sep fail" title="${escapeHtml(item.lastError)}">poll failed</span>`);
+  }
+  if (failed) {
+    meta.push(`<span class="sep fail" title="${escapeHtml(failed.tooltip)}">${escapeHtml(failed.text)}</span>`);
+  }
+
   const li = document.createElement('li');
-  li.className = 'watch-item';
-  li.dataset.key = item.key;
-
-  const status = item.status ? statusDisplay(item.status) : { text: 'pending', cssClass: 'status-pending' };
-  const isRunning = status.cssClass === 'status-running';
-  const isLoading = !item.label || item.label === item.id;
-  const isFw = isForwardPort(item);
-
-  const lastChecked = item.lastCheckedAt
-    ? formatRelativeTime(item.lastCheckedAt)
-    : 'never';
-
+  li.className = 'item';
+  li.dataset.status = statusKey;
   li.innerHTML = `
-    <div class="watch-item-header">
-      <div class="watch-item-tags">
-        <span class="type-tag type-${escapeHtml(item.type)}">${escapeHtml(item.type)}</span>
-        ${isFw ? '<span class="tag-fw">fw-port</span>' : ''}
-        ${item.finished ? '<span class="tag-done">done</span>' : ''}
-      </div>
-      <div class="watch-item-status-actions">
-        <span class="status-chip ${status.cssClass}">
-          ${isRunning ? '<span class="pulse-dot"></span>' : ''}
-          ${escapeHtml(status.text)}
-        </span>
-        <div class="watch-actions">
-          <button class="btn btn-icon" data-action="open" title="Open in runbot">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-          </button>
-          <button class="btn btn-icon btn-icon-danger" data-action="remove" title="Remove watch">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-        </div>
-      </div>
-    </div>
-    <div class="watch-item-title" title="${escapeHtml(item.label || item.id)}">
-      ${isLoading ? '<span class="skeleton"></span>' : escapeHtml(item.label || item.id)}
-    </div>
-    <div class="watch-item-footer">
-      <span class="meta-checked">
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-        ${escapeHtml(lastChecked)}
-      </span>
-      ${(() => {
-        const failedSummary = formatFailedBuilds(item.status);
-        return failedSummary
-          ? `<span class="meta-failed" title="${escapeHtml(failedSummary.tooltip)}">${escapeHtml(failedSummary.text)}</span>`
-          : '';
-      })()}
+    <span class="dot" title="${escapeHtml(status.text)}"></span>
+    <button class="title${isLoading ? ' loading' : ''}" data-action="open" title="${escapeHtml(title)}">${escapeHtml(title)}</button>
+    <span class="time" title="Last checked">${escapeHtml(formatRelativeTime(item.lastCheckedAt))}</span>
+    <div class="meta">${meta.join('')}</div>
+    <div class="actions">
+      <button class="icon-btn" data-action="open" title="Open in runbot" aria-label="Open in runbot">${ICON_OPEN}</button>
+      <button class="icon-btn remove" data-action="remove" title="Stop watching" aria-label="Stop watching">${ICON_REMOVE}</button>
     </div>
   `;
 
-  // Event listeners
-  li.querySelector('[data-action="open"]').addEventListener('click', () => {
-    const url = watchItemUrl(item);
-    chrome.tabs.create({ url });
-  });
-
+  for (const btn of li.querySelectorAll('[data-action="open"]')) {
+    btn.addEventListener('click', () => openTab(url));
+  }
   li.querySelector('[data-action="remove"]').addEventListener('click', async () => {
     li.classList.add('removing');
-    setTimeout(async () => {
-      await removeWatch(item.key);
-      showToast('Removed from watch list');
-      await renderWatchList();
-      if (currentParsed) await updateContextButtons();
-    }, 200);
+    await removeWatch(item.key);
+    showToast('Stopped watching');
   });
 
   return li;
@@ -271,74 +177,65 @@ function createWatchItem(item) {
 
 async function onPollNow() {
   btnPoll.disabled = true;
-  pollLabel.classList.add('hidden');
-  const pollIcon = btnPoll.querySelector('.poll-icon');
-  if (pollIcon) pollIcon.classList.add('hidden');
-  pollSpinner.classList.remove('hidden');
-
+  btnPoll.classList.add('busy');
   try {
-    await new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage({ action: 'pollNow' }, (response) => {
-        if (response?.error) reject(new Error(response.error));
-        else resolve();
-      });
-    });
-  } catch {
-    // Quiet
+    const response = await chrome.runtime.sendMessage({ action: 'pollNow' });
+    if (response?.error) showToast(`Check failed: ${response.error}`);
+  } catch (err) {
+    showToast(`Check failed: ${err.message}`);
+  } finally {
+    btnPoll.classList.remove('busy');
+    btnPoll.disabled = false;
   }
-
-  // Small delay to let storage update propagate
-  await new Promise(r => setTimeout(r, 500));
-  await renderWatchList();
-
-  pollSpinner.classList.add('hidden');
-  if (pollIcon) pollIcon.classList.remove('hidden');
-  pollLabel.classList.remove('hidden');
-  btnPoll.disabled = false;
 }
 
 // ── API error ────────────────────────────────────────────────────────
 
 async function checkApiError() {
   const err = await getApiError();
-  if (err) {
-    apiErrorEl.classList.remove('hidden');
-    apiErrorMsg.textContent = err;
-  } else {
-    apiErrorEl.classList.add('hidden');
-  }
+  apiErrorMsg.textContent = err || '';
+  apiErrorEl.classList.toggle('hidden', !err);
 }
 
 // ── Toast ────────────────────────────────────────────────────────────
 
+let toastTimer = null;
+
 function showToast(message) {
   toastEl.textContent = message;
-  toastEl.classList.remove('hidden');
-  // Force reflow
-  void toastEl.offsetWidth;
   toastEl.classList.add('show');
-
-  setTimeout(() => {
-    toastEl.classList.remove('show');
-    setTimeout(() => toastEl.classList.add('hidden'), 300);
-  }, 1800);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1800);
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
+function openTab(url) {
+  chrome.tabs.create({ url });
+}
+
+function capitalize(str) {
+  return str ? str[0].toUpperCase() + str.slice(1) : '';
+}
+
 function escapeHtml(str) {
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
+  // Also escapes quotes: the result is used inside attribute values.
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function formatRelativeTime(isoString) {
-  const diff = Date.now() - new Date(isoString).getTime();
-  const seconds = Math.floor(diff / 1000);
-  if (seconds < 10) return 'just now';
-  if (seconds < 60) return `${seconds}s ago`;
+  if (!isoString) return '';
+  const seconds = Math.floor((Date.now() - new Date(isoString).getTime()) / 1000);
+  if (seconds < 10) return 'now';
+  if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 60) return `${minutes}m`;
   const hours = Math.floor(minutes / 60);
-  return `${hours}h ago`;
+  if (hours < 48) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
 }

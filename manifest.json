@@ -2,12 +2,11 @@
   "manifest_version": 3,
   "name": "Runbot Watcher",
   "description": "Watch Odoo runbot bundles, batches and builds. Get desktop notifications on errors and completion.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "permissions": [
     "storage",
     "alarms",
-    "notifications",
-    "tabs"
+    "notifications"
   ],
   "host_permissions": [
     "https://runbot.odoo.com/*"

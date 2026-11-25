@@ -2,83 +2,55 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=380">
+  <meta name="color-scheme" content="light dark">
   <link rel="stylesheet" href="popup.css">
   <title>Runbot Watcher</title>
 </head>
 <body>
-  <!-- Toast -->
-  <div id="toast" class="toast hidden"></div>
+  <header class="topbar">
+    <h1>Runbot Watcher</h1>
+    <button id="btn-poll" class="icon-btn" title="Check all watches now" aria-label="Check all watches now">
+      <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 2.5v3.5H10M2.5 13.5V10H6"/><path d="M12.9 6A5 5 0 0 0 3.4 5.2M3.1 10a5 5 0 0 0 9.5.8"/></svg>
+    </button>
+  </header>
 
-  <!-- Context card (current tab) -->
-  <section id="context-card" class="context-card hidden">
-    <div id="context-not-runbot" class="empty-hint hidden">
-      <div class="empty-icon">
-        <span class="empty-icon-badge">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
-            <circle cx="12" cy="12" r="3"/>
-          </svg>
-        </span>
+  <!-- Current tab -->
+  <section class="page">
+    <p id="context-not-runbot" class="page-hint hidden">
+      Open a bundle, batch or build on
+      <a href="https://runbot.odoo.com" id="link-runbot">runbot.odoo.com</a>
+      to watch it.
+    </p>
+    <div id="context-detected" class="page-row hidden">
+      <div class="page-info">
+        <span class="label">This page</span>
+        <span id="context-id" class="page-id"></span>
       </div>
-      <p>Navigate to a <strong>runbot</strong> page to watch it.</p>
-      <p class="hint-sub">Supports bundle, batch &amp; build pages on <a href="https://runbot.odoo.com" id="link-runbot" class="runbot-link" target="_blank" rel="noopener noreferrer"><code>runbot.odoo.com</code></a></p>
-    </div>
-    <div id="context-detected" class="detected hidden">
-      <div class="detected-main">
-        <div class="detected-tags">
-          <span id="context-badge" class="type-tag"></span>
-          <span id="context-fw-badge" class="tag-fw hidden">fw-port</span>
-        </div>
-        <div id="context-id" class="detected-id"></div>
-      </div>
-      <div class="detected-actions">
-        <button id="btn-add" class="btn btn-primary">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          <span>Watch</span>
-        </button>
-        <div id="watching-state" class="watching-state hidden">
-          <span class="watching-badge">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-            Watching
-          </span>
-          <button id="btn-remove-context" class="btn-remove-pill" title="Remove from watch list">Remove</button>
-        </div>
+      <button id="btn-add" class="btn-primary">Watch</button>
+      <div id="watching-state" class="page-watching hidden">
+        <span class="watching">Watching</span>
+        <button id="btn-remove-context" class="btn-link">Stop</button>
       </div>
     </div>
   </section>
-
-  <hr class="divider">
 
   <!-- Watch list -->
-  <section class="watch-section">
-    <div class="watch-header">
-      <div class="watch-header-title">
-        <h2>Watch List</h2>
-        <span id="watch-count" class="watch-count-badge hidden">0</span>
-      </div>
-      <button id="btn-poll" class="btn btn-secondary" title="Force a poll now">
-        <svg class="poll-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-        <span id="poll-label">Poll now</span>
-        <span id="poll-spinner" class="spinner hidden"></span>
-      </button>
+  <section class="watches">
+    <div class="section-head">
+      <span class="label">Watching</span>
+      <span id="watch-count" class="count hidden"></span>
     </div>
 
-    <!-- API error banner -->
-    <div id="api-error" class="api-error hidden">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-      <span id="api-error-msg">API error</span>
+    <div id="api-error" class="banner hidden" role="status">
+      <span id="api-error-msg"></span>
     </div>
 
-    <!-- Empty state -->
-    <div id="empty-list" class="empty-list hidden">
-      <p>No watches yet.</p>
-      <p class="hint-sub">Add bundles, batches or builds to track them.</p>
-    </div>
+    <p id="empty-list" class="empty hidden">Nothing watched yet.</p>
 
-    <!-- Watch items -->
-    <ul id="watch-list" class="watch-list"></ul>
+    <ul id="watch-list" class="list"></ul>
   </section>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <script type="module" src="popup.js"></script>
 </body>
