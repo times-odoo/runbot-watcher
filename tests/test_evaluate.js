@@ -733,3 +733,12 @@ describe('trigger objects (runbot API sends { id, name, ... } instead of a name)
     assert.equal(status.result, 'ok');
   });
 });
+
+describe('findLatestBatchId with the current bundle API', () => {
+  it('reads last_batch.id (last_batch_id and batches are gone)', () => {
+    assert.equal(findLatestBatchId({ id: 1, name: 'master', last_batch: { id: 2907872, state: 'done' } }), '2907872');
+  });
+  it('returns null when the bundle has no batch yet', () => {
+    assert.equal(findLatestBatchId({ id: 1, name: 'new', last_batch: false }), null);
+  });
+});

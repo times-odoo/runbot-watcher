@@ -97,7 +97,7 @@ The extension uses the read-only JSON API of `runbot.odoo.com`:
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /runbot/api/bundle/<ids_or_names>` | Bundles with their last 40 batches |
+| `GET /runbot/api/bundle/<ids_or_names>` | Bundles with a `last_batch` summary |
 | `GET /runbot/api/batch/<ids>?depth=1&logs=errors` | Batches with slots, builds, commits, logs |
 | `GET /runbot/api/build/<ids>?depth=1&logs=errors` | Builds with state, logs, jobs, children |
 
