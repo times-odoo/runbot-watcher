@@ -183,13 +183,15 @@ async function pollBuild(item) {
     const doneKey = `done:build:${item.id}:${status.result || 'ok'}`;
     if (!hasNotified(item, doneKey)) {
       const failed = status.result === 'ko';
+      const ref = `Build #${item.id}`;
+      const name = item.customLabel || ref;
+      const detail = failed
+        ? (status.errors[0]?.message || 'Build finished with errors')
+        : (trigger ? `Trigger: ${trigger}` : 'Build completed successfully');
       await sendNotification(item, {
-        title: failed
-          ? `❌ Build #${item.id} failed`
-          : `✅ Build #${item.id} finished ${status.result || 'ok'}`,
-        message: failed
-          ? (status.errors[0]?.message || 'Build finished with errors')
-          : (trigger ? `Trigger: ${trigger}` : 'Build completed successfully'),
+        title: failed ? `❌ ${name} failed` : `✅ ${name} finished ${status.result || 'ok'}`,
+        // A custom name replaces the build number in the title: keep it here.
+        message: item.customLabel ? `${ref} · ${detail}` : detail,
         url: urlFor(item.id),
         notifKey: doneKey,
         requireInteraction: failed,
@@ -208,9 +210,11 @@ async function notifyErrors(item, status, urlFor, { defaultBuildId = null } = {}
     if (!buildId) continue; // batch-level log, no build to point to
     const notifKey = `error:${buildId}`;
     if (hasNotified(item, notifKey)) continue;
+    const where = `${error.trigger || 'build'} #${buildId}`;
+    const detail = truncate(error.message, 200) + (error.knownError ? ' (known error)' : '');
     await sendNotification(item, {
-      title: `❌ Error in ${error.trigger || 'build'} #${buildId}`,
-      message: truncate(error.message, 200) + (error.knownError ? ' (known error)' : ''),
+      title: item.customLabel ? `❌ ${item.customLabel}: error in ${where}` : `❌ Error in ${where}`,
+      message: detail,
       url: urlFor(buildId),
       notifKey,
       requireInteraction: true,
@@ -224,15 +228,22 @@ async function notifyBatchDone(item, batch, status) {
   if (hasNotified(item, doneKey)) return;
 
   const failed = status.result === 'ko';
+  const ref = `Batch #${batchId}`;
+  const name = item.customLabel || ref;
+  let detail;
+  if (failed) {
+    detail = status.errors.length
+      ? `${status.errors.length} error(s) — ${truncate(status.errors[0].message, 150)}`
+      : 'Batch finished with errors';
+  } else if (item.customLabel) {
+    detail = batch.bundle_name || 'All builds passed';
+  } else {
+    detail = batch.bundle_name ? `Bundle: ${batch.bundle_name}` : 'All builds passed';
+  }
   await sendNotification(item, {
-    title: failed
-      ? `❌ Batch #${batchId} finished with failures`
-      : `✅ Batch #${batchId} finished ${status.result || 'ok'}`,
-    message: failed
-      ? (status.errors.length
-        ? `${status.errors.length} error(s) — ${truncate(status.errors[0].message, 150)}`
-        : 'Batch finished with errors')
-      : (batch.bundle_name ? `Bundle: ${batch.bundle_name}` : 'All builds passed'),
+    title: failed ? `❌ ${name} finished with failures` : `✅ ${name} finished ${status.result || 'ok'}`,
+    // A custom name replaces the batch number in the title: keep it here.
+    message: item.customLabel ? `${ref} · ${detail}` : detail,
     url: buildBatchUrl(batchId),
     notifKey: doneKey,
     requireInteraction: failed,
