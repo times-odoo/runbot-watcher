@@ -288,11 +288,17 @@ a { color: var(--accent); }
   display: flex;
   align-items: center;
   gap: 12px;
+  /* Never wider than the popup: long names are cut, Undo stays visible. */
+  max-width: calc(100% - 20px);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.15s, transform 0.15s;
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+#toast-msg { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.toast-action { flex-shrink: 0; }
+/* Make room so the toast never covers the list (the popup can be short). */
+body.toast-open { padding-bottom: 44px; }
 /* The toast inverts the theme, so its link uses the other theme's accent. */
 .toast-action { color: #d2a5c8; font-weight: 600; }
 @media (prefers-color-scheme: dark) { .toast-action { color: #714b67; } }

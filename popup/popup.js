@@ -348,6 +348,7 @@ function showToast(message, { action = null, onAction = null } = {}) {
     onAction();
   } : null;
   toastEl.classList.add('show');
+  document.body.classList.add('toast-open');
   clearTimeout(toastTimer);
   // Leave time to reach the Undo button.
   toastTimer = setTimeout(hideToast, action ? 6000 : 1800);
@@ -356,6 +357,7 @@ function showToast(message, { action = null, onAction = null } = {}) {
 function hideToast() {
   clearTimeout(toastTimer);
   toastEl.classList.remove('show');
+  document.body.classList.remove('toast-open');
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
