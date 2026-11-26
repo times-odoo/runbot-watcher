@@ -10,7 +10,9 @@
  */
 
 import { fetchBundle, fetchBatch, fetchBuild } from './lib/api.js';
-import { evaluateBatch, evaluateBuild, findLatestBatchId, isBuildSettled, overallStatus } from './lib/evaluate.js';
+import {
+  evaluateBatch, evaluateBuild, findLatestBatchId, isBuildSettled, overallStatus, triggerName,
+} from './lib/evaluate.js';
 import { buildBatchUrl, buildBuildUrl, watchItemUrl } from './lib/urls.js';
 import { getWatches, mergePolledWatches, hasNotified, setApiError, setLastPollAt } from './lib/storage.js';
 
@@ -170,7 +172,7 @@ async function pollBatch(item) {
 async function pollBuild(item) {
   const build = await fetchBuild(item.id);
   const status = evaluateBuild(build);
-  const trigger = build.trigger || build.config || '';
+  const trigger = triggerName(build.trigger) || triggerName(build.config);
   const label = trigger ? `Build #${item.id} (${trigger})` : item.label;
   const batchId = item.batchId || (build.create_batch_id ? String(build.create_batch_id) : undefined);
   const urlFor = (buildId) => (batchId ? buildBuildUrl(batchId, buildId) : watchItemUrl(item));

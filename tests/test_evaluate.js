@@ -20,6 +20,7 @@ import {
   isServerBuild,
   isBuildSettled,
   overallStatus,
+  triggerName,
 } from '../lib/evaluate.js';
 
 // ── Mock data based on real API responses ────────────────────────────
@@ -707,5 +708,28 @@ describe('overallStatus', () => {
   });
   it('is ok when everything is done without failures', () => {
     assert.equal(overallStatus([w('done', 'ok'), w('done', 'warn')]), 'ok');
+  });
+});
+
+describe('trigger objects (runbot API sends { id, name, ... } instead of a name)', () => {
+  const trig = (name) => ({ id: 1, name, purpose: 'whatever' });
+  const build = (id, result, extra = {}) => ({ id, global_state: 'done', global_result: result, children: [], logs: [], ...extra });
+
+  it('triggerName accepts strings, objects and nothing', () => {
+    assert.equal(triggerName('Community Run'), 'Community Run');
+    assert.equal(triggerName(trig('Enterprise')), 'Enterprise');
+    assert.equal(triggerName(null), '');
+  });
+
+  it('evaluates a batch whose slot triggers are objects', () => {
+    const batch = { state: 'done', slots: [
+      { trigger: trig('Enterprise'), build: build(1, 'ko') },
+      { trigger: trig('Enterprise'), build: build(2, 'ok') }, // rebuild of the same trigger
+      { trigger: trig('Community run'), build: build(3, 'ok', { global_state: 'running' }) },
+    ] };
+    assert.deepEqual(getSlotBuilds(batch).map(b => b.trigger), ['Enterprise', 'Community run']);
+    const status = evaluateBatch(batch);
+    assert.equal(status.state, 'done');
+    assert.equal(status.result, 'ok');
   });
 });
